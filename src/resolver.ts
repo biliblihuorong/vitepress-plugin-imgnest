@@ -60,9 +60,16 @@ export class HostMatcher {
 
 class LookupSource implements Source {
   static readonly BATCH = 50;
+  // Mirrors the server-side per-link limit: one overlong link fails the
+  // whole batch, so overlong links are skipped client-side instead.
+  static readonly MAX_URL_LENGTH = 2048;
+
   private hosts: HostMatcher;
   private endpoint: URL;
   private timeout: number;
+  private cache = new Map<string, Variant[]>();
+  private rateLimited = false;
+  private warned = new Set<string>();
 
   constructor(endpoint: string, hosts: HostMatcher, timeout: number) {
     this.endpoint = new URL(endpoint);
@@ -75,18 +82,37 @@ class LookupSource implements Source {
   }
 
   async resolve(urls: string[]): Promise<Map<string, Variant[]>> {
-    const batches: string[][] = [];
-    for (let i = 0; i < urls.length; i += LookupSource.BATCH) {
-      batches.push(urls.slice(i, i + LookupSource.BATCH));
+    const result = new Map<string, Variant[]>();
+    const missing: string[] = [];
+    for (const url of urls) {
+      const cached = this.cache.get(url);
+      if (cached) result.set(url, cached);
+      else if (url.length <= LookupSource.MAX_URL_LENGTH) missing.push(url);
     }
-    const results = await Promise.all(
+    if (missing.length === 0 || this.rateLimited) return result;
+
+    const batches: string[][] = [];
+    for (let i = 0; i < missing.length; i += LookupSource.BATCH) {
+      batches.push(missing.slice(i, i + LookupSource.BATCH));
+    }
+    // allSettled: one failed batch must not discard the answers of the rest.
+    const settled = await Promise.allSettled(
       batches.map((batch) => this.lookup(batch)),
     );
-    const merged = new Map<string, Variant[]>();
-    for (const r of results) {
-      for (const [k, v] of r) merged.set(k, v);
+    for (const settledBatch of settled) {
+      if (settledBatch.status === "rejected") {
+        this.warnOnce(
+          "network",
+          `[imgnest] variant lookup at ${this.endpoint} failed, images keep their original URLs this build (${settledBatch.reason instanceof Error ? settledBatch.reason.message : settledBatch.reason})`,
+        );
+        continue;
+      }
+      for (const [url, variants] of settledBatch.value) {
+        this.cache.set(url, variants);
+        result.set(url, variants);
+      }
     }
-    return merged;
+    return result;
   }
 
   private async lookup(batch: string[]): Promise<Map<string, Variant[]>> {
@@ -99,11 +125,29 @@ class LookupSource implements Source {
         body: JSON.stringify({ urls: batch }),
         signal: controller.signal,
       });
+      if (!res.ok) {
+        if (res.status === 429) {
+          // Rate limited: stop querying this build, later pages would only
+          // push the server further over its per-minute cap.
+          this.rateLimited = true;
+        }
+        this.warnOnce(
+          `http-${res.status}`,
+          `[imgnest] variant lookup at ${this.endpoint} answered ${res.status}; matching images keep their original URLs${res.status === 429 ? " (rate limited, skipping further lookups this build; raise variant_lookup_per_minute server-side if needed)" : ""}`,
+        );
+        return new Map();
+      }
       const body: LookupResponse = await res.json();
       return LookupSource.parse(batch, body);
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private warnOnce(key: string, message: string): void {
+    if (this.warned.has(key)) return;
+    this.warned.add(key);
+    console.warn(message);
   }
 
   static parse(batch: string[], body: LookupResponse): Map<string, Variant[]> {

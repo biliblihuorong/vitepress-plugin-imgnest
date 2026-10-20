@@ -2,7 +2,6 @@ import type { Plugin } from "vite";
 import type { ImgNestResponsiveOptions, Variant } from "./types";
 import { VariantResolver } from "./resolver";
 import { collectImageUrls, rewriteAll, type RewriteOptions } from "./rewrite";
-import { imgnestMarkdownPlugin, type MarkdownPluginContext } from "./markdown";
 
 const MD_RE = /\.md(?:$|\?)/;
 
@@ -15,8 +14,6 @@ export function imgnestResponsiveImages(
     writeDimensions: options.writeDimensions,
     fallbackOnError: options.fallbackOnError,
   };
-
-  const mdCtx: MarkdownPluginContext = { resolver, options };
 
   const vitePlugin: Plugin = {
     name: "vitepress-plugin-imgnest",
@@ -49,25 +46,5 @@ export function imgnestResponsiveImages(
     },
   };
 
-  return [vitePlugin, {
-    name: "vitepress-plugin-imgnest:markdown",
-    configResolved(config) {
-      const vpConfig = config as unknown as {
-        vitepress?: {
-          site?: {
-            markdown?: {
-              config?: (md: unknown) => void;
-            };
-          };
-        };
-      };
-      if (!vpConfig.vitepress?.site?.markdown) return;
-
-      const origConfig = vpConfig.vitepress.site.markdown.config;
-      vpConfig.vitepress.site.markdown.config = (md: unknown) => {
-        origConfig?.(md);
-        imgnestMarkdownPlugin(md as Parameters<typeof imgnestMarkdownPlugin>[0], mdCtx);
-      };
-    },
-  }];
+  return [vitePlugin];
 }

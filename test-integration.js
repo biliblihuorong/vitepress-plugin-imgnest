@@ -1,6 +1,8 @@
-// Test VitePress plugin with real blog data
-import { VariantResolver } from "./src/resolver.js";
-import { collectImageUrls, rewriteAll } from "./src/rewrite.js";
+// Test VitePress plugin with real blog data.
+// Run with Node >= 22.18 (native TS type stripping):
+//   node --experimental-strip-types test-integration.js
+import { VariantResolver } from "./src/resolver.ts";
+import { collectImageUrls, rewriteAll } from "./src/rewrite.ts";
 
 const SAMPLE_MARKDOWN = `# Thinkpad T14 Gen2A
 

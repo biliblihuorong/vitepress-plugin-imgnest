@@ -12,6 +12,58 @@ const FALLBACK_LAZY = `${FALLBACK_SCRIPT};this.src=this.getAttribute('${MARKER}'
 
 const LAZY_ATTRS = ["data-src", "data-lazy-src", "data-original"];
 
+// Fenced code blocks and inline code spans often show image syntax as
+// examples. They are masked out before the regexes run and restored after,
+// so example markup inside code is never rewritten.
+const CODE_PLACEHOLDER_RE = /\u0000(\d+)\u0000/g;
+
+export function maskCodeSegments(content: string): {
+  masked: string;
+  segments: string[];
+} {
+  const segments: string[] = [];
+  const masked = maskInlineCode(maskFencedBlocks(content, segments), segments);
+  return { masked, segments };
+}
+
+export function unmaskCodeSegments(
+  content: string,
+  segments: string[],
+): string {
+  return content.replace(CODE_PLACEHOLDER_RE, (_, index: string) =>
+    segments[Number(index)] !== undefined ? segments[Number(index)] : "",
+  );
+}
+
+function maskFencedBlocks(content: string, segments: string[]): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const open = lines[i].match(/^ {0,3}(```+|~~~+)/);
+    if (open) {
+      const marker = open[1];
+      const closeRe = new RegExp(`^ {0,3}\\${marker[0]}{${marker.length},}\\s*$`);
+      let j = i + 1;
+      while (j < lines.length && !closeRe.test(lines[j])) j += 1;
+      segments.push(lines.slice(i, Math.min(j + 1, lines.length)).join("\n"));
+      out.push(`\u0000${segments.length - 1}\u0000`);
+      i = j + 1;
+    } else {
+      out.push(lines[i]);
+      i += 1;
+    }
+  }
+  return out.join("\n");
+}
+
+function maskInlineCode(content: string, segments: string[]): string {
+  return content.replace(/(`+)[^`]*?\1/g, (code) => {
+    segments.push(code);
+    return `\u0000${segments.length - 1}\u0000`;
+  });
+}
+
 export function buildSrcset(variants: Variant[], originalUrl?: string): string {
   const entries = variants.map(
     (v) => `${v.url.replace(/ /g, "%20")} ${v.width}w`,
@@ -148,16 +200,17 @@ const HTML_IMG_RE = /<img\b[^>]*\/?>/gi;
 
 export function collectImageUrls(content: string): string[] {
   const urls = new Set<string>();
+  const { masked } = maskCodeSegments(content);
 
   let m: RegExpExecArray | null;
   const mdRe = new RegExp(MD_IMG_RE.source, "g");
-  while ((m = mdRe.exec(content)) !== null) {
+  while ((m = mdRe.exec(masked)) !== null) {
     const url = m[2].split(/\s+/)[0];
     if (isImageUrl(url)) urls.add(url.trim());
   }
 
   const htmlRe = new RegExp(HTML_IMG_RE.source, "gi");
-  while ((m = htmlRe.exec(content)) !== null) {
+  while ((m = htmlRe.exec(masked)) !== null) {
     const candidate = findCandidate(m[0]);
     if (candidate) urls.add(candidate.url);
   }
@@ -223,7 +276,9 @@ export function rewriteAll(
   variants: Map<string, Variant[]>,
   options: RewriteOptions,
 ): string {
-  let result = rewriteMarkdownImages(content, variants, options);
+  const { masked, segments } = maskCodeSegments(content);
+  let result = rewriteMarkdownImages(masked, variants, options);
   result = rewriteHtmlImages(result, variants, options);
-  return result;
+  if (result === masked) return content;
+  return unmaskCodeSegments(result, segments);
 }

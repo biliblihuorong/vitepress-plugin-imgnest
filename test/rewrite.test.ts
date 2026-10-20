@@ -193,3 +193,57 @@ describe("rewriteAll", () => {
     expect(result).toContain("b_400.webp");
   });
 });
+
+describe("code segments are never rewritten", () => {
+  const variants = new Map<string, Variant[]>([
+    ["https://img.example.com/a.webp", variants400_800],
+  ]);
+
+  it("collectImageUrls ignores markdown images inside fenced blocks", () => {
+    const content = "```markdown\n![alt](https://img.example.com/a.webp)\n```\n";
+    expect(collectImageUrls(content)).toHaveLength(0);
+  });
+
+  it("collectImageUrls ignores images inside inline code", () => {
+    const content = "Use `![alt](https://img.example.com/a.webp)` to embed.";
+    expect(collectImageUrls(content)).toHaveLength(0);
+  });
+
+  it("collectImageUrls ignores HTML img tags inside tilde fences", () => {
+    const content = '~~~\n<img src="https://img.example.com/a.webp">\n~~~\n';
+    expect(collectImageUrls(content)).toHaveLength(0);
+  });
+
+  it("rewriteAll keeps fenced examples untouched while rewriting real images", () => {
+    const content = [
+      "Example:",
+      "",
+      "```markdown",
+      "![alt](https://img.example.com/a.webp)",
+      "```",
+      "",
+      "![real](https://img.example.com/a.webp)",
+    ].join("\n");
+    const result = rewriteAll(content, variants, {});
+    expect(result).toContain("![alt](https://img.example.com/a.webp)");
+    expect(result).toContain("```markdown");
+    expect(result).toContain('<img src="https://img.example.com/a.webp" srcset=');
+    expect(result).toContain("a_400.webp 400w");
+  });
+
+  it("rewriteAll keeps inline code examples untouched", () => {
+    const content = [
+      "Use `![alt](https://img.example.com/a.webp)` inline.",
+      "",
+      "![real](https://img.example.com/a.webp)",
+    ].join("\n");
+    const result = rewriteAll(content, variants, {});
+    expect(result).toContain("`![alt](https://img.example.com/a.webp)`");
+    expect(result).toContain("a_400.webp 400w");
+  });
+
+  it("rewriteAll returns the original string when nothing matches", () => {
+    const content = "```markdown\n![alt](https://img.example.com/a.webp)\n```\n";
+    expect(rewriteAll(content, variants, {})).toBe(content);
+  });
+});
