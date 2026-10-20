@@ -68,7 +68,10 @@ class LookupSource implements Source {
   private endpoint: URL;
   private timeout: number;
   private cache = new Map<string, Variant[]>();
-  private rateLimited = false;
+  // url -> in-flight batch promise, so concurrent transforms sharing an URL
+  // that is not cached yet reuse one POST instead of racing duplicates.
+  private pending = new Map<string, Promise<Map<string, Variant[]>>>();
+  private rateLimitedAt = 0;
   private warned = new Set<string>();
 
   constructor(endpoint: string, hosts: HostMatcher, timeout: number) {
@@ -81,38 +84,70 @@ class LookupSource implements Source {
     return this.hosts.matches(url);
   }
 
+  // A 429 pauses lookups for a minute instead of disabling them forever:
+  // long-running processes (vite dev, build watchers) share one resolver.
+  static readonly RATE_LIMIT_COOLDOWN = 60000;
+
   async resolve(urls: string[]): Promise<Map<string, Variant[]>> {
     const result = new Map<string, Variant[]>();
-    const missing: string[] = [];
+    const fresh: string[] = [];
+    const asked: string[] = [];
+    const waitables: Promise<unknown>[] = [];
     for (const url of urls) {
       const cached = this.cache.get(url);
-      if (cached) result.set(url, cached);
-      else if (url.length <= LookupSource.MAX_URL_LENGTH) missing.push(url);
-    }
-    if (missing.length === 0 || this.rateLimited) return result;
-
-    const batches: string[][] = [];
-    for (let i = 0; i < missing.length; i += LookupSource.BATCH) {
-      batches.push(missing.slice(i, i + LookupSource.BATCH));
-    }
-    // allSettled: one failed batch must not discard the answers of the rest.
-    const settled = await Promise.allSettled(
-      batches.map((batch) => this.lookup(batch)),
-    );
-    for (const settledBatch of settled) {
-      if (settledBatch.status === "rejected") {
-        this.warnOnce(
-          "network",
-          `[imgnest] variant lookup at ${this.endpoint} failed, images keep their original URLs this build (${settledBatch.reason instanceof Error ? settledBatch.reason.message : settledBatch.reason})`,
-        );
+      if (cached) {
+        result.set(url, cached);
         continue;
       }
-      for (const [url, variants] of settledBatch.value) {
-        this.cache.set(url, variants);
-        result.set(url, variants);
+      if (url.length > LookupSource.MAX_URL_LENGTH) continue;
+      const pending = this.pending.get(url);
+      if (pending) {
+        asked.push(url);
+        waitables.push(pending);
+      } else {
+        fresh.push(url);
       }
     }
+    const cooling =
+      this.rateLimitedAt > 0 &&
+      Date.now() - this.rateLimitedAt < LookupSource.RATE_LIMIT_COOLDOWN;
+    if (fresh.length > 0 && !cooling) {
+      for (let i = 0; i < fresh.length; i += LookupSource.BATCH) {
+        const batch = fresh.slice(i, i + LookupSource.BATCH);
+        const running = this.runBatch(batch);
+        for (const url of batch) this.pending.set(url, running);
+        asked.push(...batch);
+        waitables.push(running);
+        running.finally(() => {
+          for (const url of batch) this.pending.delete(url);
+        });
+      }
+    }
+    await Promise.allSettled(waitables);
+    for (const url of asked) {
+      const variants = this.cache.get(url);
+      if (variants) result.set(url, variants);
+    }
     return result;
+  }
+
+  // Never rejects: failures are warned about once and yield no entries.
+  private runBatch(
+    batch: string[],
+  ): Promise<Map<string, Variant[]>> {
+    return this.lookup(batch).then(
+      (resolved) => {
+        for (const [url, variants] of resolved) this.cache.set(url, variants);
+        return resolved;
+      },
+      (err: unknown) => {
+        this.warnOnce(
+          "network",
+          `[imgnest] variant lookup at ${this.endpoint} failed, images keep their original URLs (${err instanceof Error ? err.message : err})`,
+        );
+        return new Map<string, Variant[]>();
+      },
+    );
   }
 
   private async lookup(batch: string[]): Promise<Map<string, Variant[]>> {
@@ -127,13 +162,11 @@ class LookupSource implements Source {
       });
       if (!res.ok) {
         if (res.status === 429) {
-          // Rate limited: stop querying this build, later pages would only
-          // push the server further over its per-minute cap.
-          this.rateLimited = true;
+          this.rateLimitedAt = Date.now();
         }
         this.warnOnce(
           `http-${res.status}`,
-          `[imgnest] variant lookup at ${this.endpoint} answered ${res.status}; matching images keep their original URLs${res.status === 429 ? " (rate limited, skipping further lookups this build; raise variant_lookup_per_minute server-side if needed)" : ""}`,
+          `[imgnest] variant lookup at ${this.endpoint} answered ${res.status}; matching images keep their original URLs${res.status === 429 ? " (rate limited, pausing lookups for a minute; raise variant_lookup_per_minute server-side if needed)" : ""}`,
         );
         return new Map();
       }
@@ -211,10 +244,12 @@ class TemplateSource implements Source {
 
   private build(url: string, width: number): string {
     const sep = url.includes("?") ? "&" : "?";
+    // Replacer functions: a URL containing "$&" or "$'" would otherwise be
+    // mangled by String.replace's replacement patterns.
     return this.template
-      .replace("{url}", url)
-      .replace("{sep}", sep)
-      .replace("{width}", String(width));
+      .replace(/\{url\}/g, () => url)
+      .replace(/\{sep\}/g, () => sep)
+      .replace(/\{width\}/g, () => String(width));
   }
 
   describe(): string {
@@ -239,7 +274,10 @@ export class VariantResolver {
 
     if (cfg.type === "template") {
       if (!cfg.template?.includes("{width}")) return null;
-      const widths = (cfg.widths ?? "400,800,1600")
+      const rawWidths = Array.isArray(cfg.widths)
+        ? cfg.widths.join(",")
+        : cfg.widths;
+      const widths = (rawWidths || "400,800,1600")
         .split(/[,\s]+/)
         .filter((s) => /^\d{1,5}$/.test(s))
         .map(Number);

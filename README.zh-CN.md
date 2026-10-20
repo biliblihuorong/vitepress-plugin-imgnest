@@ -87,13 +87,15 @@ export default defineConfig({
 - **Markdown 图片**：`![alt](url)` 转换为带 `srcset` 的 `<img>` 标签。
 - **内嵌 HTML 图片**：Markdown 里的 `<img src="...">` 直接补写属性。
 - **代码块零改动**：围栏代码块和行内代码里出现的图片语法原样保留——示例代码不会被误改写。
+- 缩进（4 空格）代码块暂不保护——需要原样保留的示例请使用围栏代码块。
 - 已有 `srcset` 的图片跳过；已有的 `sizes` 不会被覆盖。
 - 懒加载属性（`data-src`、`data-lazy-src`、`data-original`）优先于 `src`。
-- 原图 URL 会作为 `srcset` 的最后一项保留；开启 `fallbackOnError` 时，衍生图加载失败会通过 `onerror` 撤下 `srcset`，图片始终能回退到原图。
+- 每张图片的原 URL 都会保留为 `srcset` 的最后一项；开启 `fallbackOnError` 时，`src` 直连的图片在衍生图加载失败时会通过 `onerror` 撤下 `srcset`（懒加载图片交给其加载库处理）。
 - 只处理 `.md` 文件——Vue 组件里的 `<img>` 不在处理范围内。
 - 查询结果在整个构建期间缓存：同一 URL 无论出现在多少个页面，只会查询一次。
-- 服务端返回非 200 时（例如 ImgNest 默认每 IP 每分钟 60 次的限流），插件只警告一次并保留原图 URL；收到 `429` 后本次构建不再继续查询。站点较大时可在 ImgNest 服务端调高 `variant_lookup_per_minute`。
+- 服务端返回非 200 时（例如 ImgNest 默认每 IP 每分钟 60 次的限流），插件只警告一次并保留原图 URL；收到 `429` 后暂停查询一分钟再继续。站点较大时可在 ImgNest 服务端调高 `variant_lookup_per_minute`。
 - 超过 2048 字符（服务端上限）的 URL 会被跳过，不会导致整批查询失败。
+- 需要 Node.js >= 18（使用内置 `fetch`）。
 
 ## 许可证
 

@@ -247,3 +247,52 @@ describe("code segments are never rewritten", () => {
     expect(rewriteAll(content, variants, {})).toBe(content);
   });
 });
+
+describe("review fixes", () => {
+  const variants = new Map<string, Variant[]>([
+    ["https://img.example.com/a.webp", variants400_800],
+  ]);
+
+  it("protects valid compact srcset without whitespace after the comma", () => {
+    const tag = '<img src="https://img.example.com/a.webp" srcset="https://img.example.com/a.webp 1x,https://img.example.com/a_800.webp 2x">';
+    expect(rewriteImgTag(tag, variants400_800, {})).toBe(tag);
+  });
+
+  it("escapes quotes from alt text into attribute-safe HTML", () => {
+    const content = '![He said "hi"](https://img.example.com/a.webp)';
+    const result = rewriteMarkdownImages(content, variants, {});
+    expect(result).toContain('alt="He said &quot;hi&quot;"');
+    expect(result).not.toContain('alt="He said "');
+  });
+
+  it("does not allow attribute injection through crafted alt text", () => {
+    const content = '![x" onerror="alert(1)](https://img.example.com/a.webp)';
+    const result = rewriteMarkdownImages(content, variants, {});
+    expect(result).not.toContain('onerror="alert(1)"');
+    expect(result).toContain('alt="x&quot; onerror=&quot;alert(1)"');
+  });
+
+  it("survives stray backticks pairing across a fenced block", () => {
+    const content = [
+      "A ` b",
+      "```markdown",
+      "![alt](https://img.example.com/a.webp)",
+      "```",
+      "c ` d",
+      "",
+      "![real](https://img.example.com/a.webp)",
+    ].join("\n");
+    const result = rewriteAll(content, variants, {});
+    expect(result).not.toContain("\u0000");
+    expect(result).toContain("![alt](https://img.example.com/a.webp)");
+    expect(result).toContain("```markdown");
+    expect(result).toContain("a_400.webp 400w");
+  });
+
+  it("keeps unknown placeholders instead of deleting content", async () => {
+    const { unmaskCodeSegments, maskCodeSegments } = await import("../src/rewrite");
+    expect(unmaskCodeSegments("A \u000099\u0000 B", [])).toBe("A \u000099\u0000 B");
+    const { masked } = maskCodeSegments("plain `code` text");
+    expect(masked).not.toContain("`code`");
+  });
+});

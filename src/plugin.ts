@@ -4,13 +4,14 @@ import { VariantResolver } from "./resolver";
 import { collectImageUrls, rewriteAll, type RewriteOptions } from "./rewrite";
 
 const MD_RE = /\.md(?:$|\?)/;
+const DEFAULT_SIZES = "(max-width: 800px) 100vw, 800px";
 
 export function imgnestResponsiveImages(
   options: ImgNestResponsiveOptions,
 ): Plugin[] {
   const resolver = new VariantResolver(options);
   const rewriteOpts: RewriteOptions = {
-    sizes: options.sizes,
+    sizes: options.sizes ?? DEFAULT_SIZES,
     writeDimensions: options.writeDimensions,
     fallbackOnError: options.fallbackOnError,
   };

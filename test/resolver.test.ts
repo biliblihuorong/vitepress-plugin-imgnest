@@ -251,3 +251,36 @@ describe("LookupSource fetch behaviour", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("review fixes", () => {
+  it("accepts widths as an array without crashing", () => {
+    const resolver = new VariantResolver({
+      sources: [
+        {
+          type: "template",
+          hosts: "img.example.com",
+          template: "{url}{sep}w_{width}",
+          widths: [400, 800],
+        },
+      ],
+    });
+    expect(resolver.hasSources).toBe(true);
+  });
+
+  it("does not mangle template URLs containing $ replacement patterns", async () => {
+    const resolver = new VariantResolver({
+      sources: [
+        {
+          type: "template",
+          hosts: "img.example.com",
+          template: "{url}{sep}w_{width}",
+          widths: "400",
+        },
+      ],
+    });
+    const result = await resolver.resolve(["https://img.example.com/a$&b.webp"]);
+    expect(result.get("https://img.example.com/a$&b.webp")![0].url).toBe(
+      "https://img.example.com/a$&b.webp?w_400",
+    );
+  });
+});

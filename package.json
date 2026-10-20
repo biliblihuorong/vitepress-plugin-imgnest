@@ -1,6 +1,6 @@
 {
   "name": "vitepress-plugin-imgnest",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "ImgNest responsive images plugin for VitePress",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -36,6 +36,9 @@
   ],
   "license": "MIT",
   "author": "misakashell",
+  "engines": {
+    "node": ">=18"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/biliblihuorong/vitepress-plugin-imgnest.git"

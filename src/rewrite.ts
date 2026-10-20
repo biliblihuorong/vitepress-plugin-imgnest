@@ -30,8 +30,14 @@ export function unmaskCodeSegments(
   content: string,
   segments: string[],
 ): string {
-  return content.replace(CODE_PLACEHOLDER_RE, (_, index: string) =>
-    segments[Number(index)] !== undefined ? segments[Number(index)] : "",
+  // Unknown indices are kept as-is instead of deleted: author content that
+  // happens to look like a placeholder must never be silently dropped.
+  return content.replace(
+    CODE_PLACEHOLDER_RE,
+    (match: string, index: string) => {
+      const segment = segments[Number(index)];
+      return segment !== undefined ? segment : match;
+    },
   );
 }
 
@@ -58,7 +64,9 @@ function maskFencedBlocks(content: string, segments: string[]): string {
 }
 
 function maskInlineCode(content: string, segments: string[]): string {
-  return content.replace(/(`+)[^`]*?\1/g, (code) => {
+  // Single line only: a span that could run across newlines would swallow
+  // the placeholder line of a fenced block restored by two stray backticks.
+  return content.replace(/(`+)[^`\n]*?\1/g, (code) => {
     segments.push(code);
     return `\u0000${segments.length - 1}\u0000`;
   });
@@ -94,12 +102,23 @@ function getAttr(tag: string, name: string): string | null {
   return m ? (m[1] ?? m[2] ?? null) : null;
 }
 
+// Escapes a value for double-quoted attribute context. URLs, alt text and
+// sizes all end up inside generated HTML, and an unescaped quote would
+// close the attribute early (an XSS vector in authored markdown).
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function setAttr(tag: string, name: string, value: string): string {
   const re = new RegExp(`\\s${name}\\s*=\\s*(?:"[^"]*"|'[^']*')`, "i");
   if (re.test(tag)) {
-    return tag.replace(re, ` ${name}="${value}"`);
+    return tag.replace(re, ` ${name}="${escapeAttr(value)}"`);
   }
-  return tag.replace(/\/?\s*>$/, ` ${name}="${value}">`);
+  return tag.replace(/\/?\s*>$/, ` ${name}="${escapeAttr(value)}">`);
 }
 
 function hasAttr(tag: string, name: string): boolean {
@@ -112,7 +131,8 @@ function isPlaceholderSrcset(
   src: string | null,
 ): boolean {
   if (!hasText(srcset)) return true;
-  const items = srcset!.split(/,\s+|,$/);
+  // Whitespace after the comma is optional in valid srcset syntax.
+  const items = srcset!.split(/\s*,\s*/).filter(Boolean);
   for (const item of items) {
     const parts = item.trim().split(/\s+/);
     if (!parts[0]) continue;
@@ -232,11 +252,14 @@ export function rewriteMarkdownImages(
       if (!v || v.length === 0) return match;
 
       const titleMatch = urlPart.match(/"([^"]*)"/);
-      const title = titleMatch ? ` title="${titleMatch[1]}"` : "";
+      const title = titleMatch ? ` title="${escapeAttr(titleMatch[1])}"` : "";
       const srcset = buildSrcset(v, url);
-      const sizes = options.sizes ? ` sizes="${options.sizes.trim()}"` : "";
+      const sizes = options.sizes ? ` sizes="${escapeAttr(options.sizes.trim())}"` : "";
 
-      let tag = `<img src="${url}" srcset="${srcset}"${sizes} alt="${alt}"${title}`;
+      // Every interpolated value is escaped: alt and title come from
+      // authored markdown, URLs may contain quotes, and the transform runs
+      // before markdown-it, so raw HTML here reaches the page verbatim.
+      let tag = `<img src="${escapeAttr(url)}" srcset="${escapeAttr(srcset)}"${sizes} alt="${escapeAttr(alt)}"${title}`;
 
       if (options.fallbackOnError !== false) {
         tag += ` onerror="${FALLBACK_SCRIPT}"`;

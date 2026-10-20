@@ -9,7 +9,7 @@ export interface SourceConfig {
   hosts: string;
   endpoint?: string;
   template?: string;
-  widths?: string;
+  widths?: string | string[];
 }
 
 export interface ImgNestResponsiveOptions {
