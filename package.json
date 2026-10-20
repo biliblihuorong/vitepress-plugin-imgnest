@@ -1,6 +1,6 @@
 {
   "name": "vitepress-plugin-imgnest",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "ImgNest responsive images plugin for VitePress",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -15,7 +15,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "build": "tsup",

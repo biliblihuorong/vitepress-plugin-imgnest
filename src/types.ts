@@ -18,7 +18,6 @@ export interface ImgNestResponsiveOptions {
   writeDimensions?: boolean;
   fallbackOnError?: boolean;
   timeout?: number;
-  batchSize?: number;
 }
 
 export interface LookupResponse {

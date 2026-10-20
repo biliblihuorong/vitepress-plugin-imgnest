@@ -1,16 +1,22 @@
 # vitepress-plugin-imgnest
 
-ImgNest 响应式图片的 VitePress 插件。构建时扫描 Markdown 中的图片，批量查询 ImgNest 的衍生版本接口，自动为 `<img>` 补上 `srcset` 和 `sizes`。
+English | [简体中文](./README.zh-CN.md)
 
-## 安装
+VitePress plugin for ImgNest responsive images. At build time it scans images in Markdown files, batch-queries ImgNest's variant lookup API, and automatically adds `srcset` and `sizes` to `<img>` tags.
+
+## Requirements
+
+An ImgNest server with responsive variants enabled. The build machine must be able to reach the public lookup endpoint (`POST /api/variants`) — no CORS setup is needed, because queries are made by Node, not the browser.
+
+## Install
 
 ```bash
 npm install vitepress-plugin-imgnest
 ```
 
-## 配置
+## Usage
 
-在 `.vitepress/config.ts` 中使用：
+In `.vitepress/config.ts`:
 
 ```ts
 import { defineConfig } from "vitepress";
@@ -34,11 +40,11 @@ export default defineConfig({
 });
 ```
 
-## 图片来源
+## Image sources
 
-### 查询接口（ImgNest）
+### Lookup API (ImgNest)
 
-适合 ImgNest 等预生成衍生图的图床：
+For image hosts that pre-generate variants, such as ImgNest:
 
 ```ts
 {
@@ -48,11 +54,11 @@ export default defineConfig({
 }
 ```
 
-构建时向 `POST {endpoint}` 发送 `{"urls": [...]}` 批量查询，响应格式与 ImgNest `/api/variants` 一致。
+At build time the plugin sends `POST {endpoint}` with `{"urls": [...]}`, in batches of at most 50 URLs — exactly the ImgNest `/api/variants` protocol.
 
-### URL 规则（CDN）
+### CDN URL template
 
-适合能实时缩放的 CDN（阿里云 OSS、腾讯云 COS、七牛等）：
+For CDNs that can resize on the fly (Alibaba Cloud OSS, Tencent Cloud COS, Qiniu, etc.):
 
 ```ts
 {
@@ -63,26 +69,32 @@ export default defineConfig({
 }
 ```
 
-不发请求，直接按模板拼接 URL。`{url}` 为原图地址，`{sep}` 自动为 `?` 或 `&`，`{width}` 为宽度值。
+No requests are made; variant URLs are built from the template. `{url}` is the original image URL, `{sep}` becomes `?` or `&` automatically, and `{width}` is the variant width.
 
-## 配置项
+## Options
 
-| 选项 | 默认值 | 说明 |
+| Option | Default | Description |
 |---|---|---|
-| `sources` | （必填） | 图片来源列表，按顺序匹配 |
-| `sizes` | `(max-width: 800px) 100vw, 800px` | 图片没有 `sizes` 时补上的默认值 |
-| `writeDimensions` | `false` | 写入最大版本的 `width`/`height`，需主题设置 `height: auto` |
-| `fallbackOnError` | `true` | 衍生图加载失败时撤下 `srcset`，回退到原图 |
-| `timeout` | `5000` | 查询超时时间（毫秒） |
+| `sources` | (required) | Image source list, matched in order |
+| `sizes` | `(max-width: 800px) 100vw, 800px` | Default `sizes` added when an image has none |
+| `writeDimensions` | `false` | Write the largest variant's `width`/`height`; set `height: auto` in your CSS to keep the aspect ratio |
+| `fallbackOnError` | `true` | Remove `srcset` and fall back to the original when a variant fails to load |
+| `timeout` | `5000` | Lookup timeout in milliseconds |
 
-## 处理范围
+## Scope and behavior
 
-- **Markdown 图片**：`![alt](url)` 转换为带 `srcset` 的 `<img>` 标签
-- **HTML img 标签**：Markdown 中内嵌的 `<img src="...">` 直接补写属性
-- 已有 `srcset` 的图片跳过，不改写
-- 已有 `sizes` 的图片不覆盖
-- 懒加载属性（`data-src`、`data-lazy-src`、`data-original`）优先于 `src`
+- Processes raw Markdown before VitePress compiles it, so it works for both VitePress themes and custom layouts.
+- **Markdown images**: `![alt](url)` becomes an `<img>` tag with `srcset`.
+- **Inline HTML images**: `<img src="...">` in Markdown gets the attributes added directly.
+- **Code is never touched**: image syntax shown inside fenced code blocks or inline code stays exactly as written — code examples are safe.
+- Images that already have a `srcset` are skipped; an existing `sizes` is never overwritten.
+- Lazy-load attributes (`data-src`, `data-lazy-src`, `data-original`) take priority over `src`.
+- The original URL is kept as the last `srcset` entry, and with `fallbackOnError` an `onerror` handler removes the `srcset` if a variant fails to load, so images always fall back to the original.
+- Only `.md` files are processed — `<img>` inside Vue components is not.
+- Lookup results are cached for the whole build: every URL is queried once, no matter how many pages use it.
+- On a non-200 answer (for example ImgNest's default rate limit of 60 lookups per minute per IP) the plugin logs a warning once and keeps the original URLs; on `429` it stops querying for the rest of the build. Raise `variant_lookup_per_minute` on your ImgNest server if your site is large.
+- URLs longer than 2048 characters (the server-side limit) are skipped instead of failing the whole batch.
 
-## 许可证
+## License
 
 MIT
