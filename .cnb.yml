@@ -1,36 +1,60 @@
-pipeline:
-  - stage: 测试
-    name: 单元测试
-    steps:
-      - step: npmbuild@nodejs
-        name: 安装依赖并测试
-        inputs:
-          node_version: "20"
-          commands:
-            - npm ci
-            - npx vitest run
-
-  - stage: 构建
-    name: 打包
-    steps:
-      - step: npmbuild@nodejs
-        name: 构建产物
-        inputs:
-          node_version: "20"
-          commands:
-            - npm ci
-            - npx tsup
-        outputs:
-          - dist/**
-
-triggers:
+main:
   push:
-    branches:
-      include:
-        - main
-        - "feat/**"
-        - "fix/**"
-  pr:
-    branches:
-      include:
-        - main
+    - name: 测试
+      docker:
+        image: node:20
+      stages:
+        - name: 单元测试
+          jobs:
+            - name: 安装依赖并测试
+              script:
+                - npm ci
+                - npx vitest run
+    - name: 构建
+      docker:
+        image: node:20
+      stages:
+        - name: 打包
+          jobs:
+            - name: 构建产物
+              script:
+                - npm ci
+                - npx tsup
+
+  pull_request:
+    - name: 测试
+      docker:
+        image: node:20
+      stages:
+        - name: 单元测试
+          jobs:
+            - name: 安装依赖并测试
+              script:
+                - npm ci
+                - npx vitest run
+
+feat/*:
+  push:
+    - name: 测试
+      docker:
+        image: node:20
+      stages:
+        - name: 单元测试
+          jobs:
+            - name: 安装依赖并测试
+              script:
+                - npm ci
+                - npx vitest run
+
+fix/*:
+  push:
+    - name: 测试
+      docker:
+        image: node:20
+      stages:
+        - name: 单元测试
+          jobs:
+            - name: 安装依赖并测试
+              script:
+                - npm ci
+                - npx vitest run
